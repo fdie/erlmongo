@@ -23,7 +23,7 @@ name(Collection,PMI) when is_atom(Collection) ->
 	name(atom_to_binary(Collection, latin1),PMI).
 
 remove(Col, Selector, {?MODULE,[Pool,DB]}) ->
-	mongodb:exec_delete(Pool,name(Col,{?MODULE,[Pool,DB]}), #delete{selector = bson:encode(Selector)}).
+	mongodb:exec_delete(Pool,name(Col,{?MODULE,[Pool,DB]}), #delete{selector = bson2:encode(Selector)}).
 remove_sync(Col, Selector, {?MODULE,[Pool,DB]}) ->
 	case runCmd([{delete, Col}, {deletes, {array,[[{q, Selector},{limit,0}]]}}],{?MODULE,[Pool,DB]}) of
 		[_|_] = Obj ->
@@ -99,7 +99,7 @@ update(Col, Selector, Doc, Flags,PMI) ->
 batchUpdate(Col, Selectors, Docs, Flags, PMI) ->
 	run_update(Col, Selectors, Docs, Flags,PMI).
 updateAsync(Collection, Selector, Doc, Flags,{?MODULE,[Pool,DB]}) ->
-	mongodb:exec_update(Pool,name(Collection,{?MODULE,[Pool,DB]}), #update{selector = bson:encode(Selector), document = bson:encode(Doc), upsert = updateflags(Flags,0)}).
+	mongodb:exec_update(Pool,name(Collection,{?MODULE,[Pool,DB]}), #update{selector = bson2:encode(Selector), document = bson2:encode(Doc), upsert = updateflags(Flags,0)}).
 
 run_update(Col, Sels, Docs, Flags,PMI) ->
 	[Upsert,Multi] = [lists:member(S,Flags) || S <- [upsert,multi]],
@@ -121,7 +121,7 @@ run_update(Col, Sels, Docs, Flags,PMI) ->
 batchUpdateAsync(Col, [_|_] = Selector, [_|_] = Doc, Flags,{?MODULE,[Pool,DB]}) ->
 	mongodb:exec_update(Pool,name(Col,{?MODULE,[Pool,DB]}),encbu([],Selector,Doc,updateflags(Flags,0))).
 encbu(L, [Sel|ST],[[_|_] = Doc|DT],Flags) ->
-	encbu([#update{selector = bson:encode(Sel), document = bson:encode(Doc), upsert = Flags}|L],ST,DT,Flags);
+	encbu([#update{selector = bson2:encode(Sel), document = bson2:encode(Doc), upsert = Flags}|L],ST,DT,Flags);
 encbu(L,[],[],_) ->
 	L.
 
@@ -135,7 +135,7 @@ updateflags([], V) ->
 insert(Col, L, PMI) ->
 	run_insert(Col,[L], PMI).
 insertAsync(Col, L, {?MODULE,[Pool,DB]}) ->
-	mongodb:exec_insert(Pool,name(Col,{?MODULE,[Pool,DB]}), #insert{documents = bson:encode(L)}).
+	mongodb:exec_insert(Pool,name(Col,{?MODULE,[Pool,DB]}), #insert{documents = bson2:encode(L)}).
 
 
 run_insert(Col,L,PMI) ->
@@ -155,7 +155,7 @@ run_insert(Col,L,PMI) ->
 batchInsert(Col, [_|_] = LRecs, PMI) ->
 	run_insert(Col, LRecs, PMI).
 batchInsertAsync(Col, [_|_] = LRecs,{?MODULE,[Pool,DB]}) ->
-	DocBin = lists:foldl(fun(L, Bin) -> <<Bin/binary, (bson:encode(L))/binary>> end, <<>>, LRecs),
+	DocBin = lists:foldl(fun(L, Bin) -> <<Bin/binary, (bson2:encode(L))/binary>> end, <<>>, LRecs),
 	mongodb:exec_insert(Pool,name(Col,{?MODULE,[Pool,DB]}), #insert{documents = DocBin}).
 
 % Advanced queries:
@@ -207,9 +207,9 @@ find(Col, Query, Selector, From, Limit,{?MODULE,[Pool,DB]}) ->
 	find(Col, Query, Selector, From, Limit, proplist,{?MODULE,[Pool,DB]}).
 find(Col, Query, Selector, From, Limit,Format,{?MODULE,[Pool,DB]}) ->
 	TStart = erlang:monotonic_time(millisecond),
-	QueryBin = bson:encode(Query),
+	QueryBin = bson2:encode(Query),
 	QuerySize = iolist_size(QueryBin),
-	Quer = #search{ndocs = Limit, nskip = From, criteria = QueryBin, field_selector = bson:encode(Selector)},
+	Quer = #search{ndocs = Limit, nskip = From, criteria = QueryBin, field_selector = bson2:encode(Selector)},
 	case mongodb:exec_find(Pool,name(Col,{?MODULE,[Pool,DB]}), Quer) of
 		not_connected ->
 			not_connected;
@@ -217,7 +217,7 @@ find(Col, Query, Selector, From, Limit,Format,{?MODULE,[Pool,DB]}) ->
 			{ok, []};
 		{ok,Tracing,Res} ->
 			BsonSize = iolist_size(Res),
-			Decoded = bson:decode(Format,Res),
+			Decoded = bson2:decode(Format,Res),
 			TEnd = erlang:monotonic_time(millisecond),
 			TracingQ = Tracing#{col => Col, q => Query, q_size => QuerySize, 
 				selector => Selector, from => From, limit => Limit, 
@@ -240,7 +240,7 @@ report(Time,Obj) ->
 findOpt(Col, Query, Selector, Opts, From, Limit,{?MODULE,[Pool,DB]}) ->
 	case Query of
 		[] ->
-			{_,Format,Q} = translateopts(false,undefined, Opts,[{<<"query">>, {bson,bson:encode([])}}],proplist);
+			{_,Format,Q} = translateopts(false,undefined, Opts,[{<<"query">>, {bson,bson2:encode([])}}],proplist);
 		_ ->
 			{_,Format,Q} = translateopts(false,undefined, Opts,[{<<"query">>, Query}],proplist)
 	end,
@@ -253,18 +253,18 @@ findOpt(Col, #search{} = Q, Opts,{?MODULE,[Pool,DB]}) ->
 cursor(Col,Query, Selector, Opts, From, Limit,{?MODULE,[Pool,DB]}) ->
 	cursor(Col,Query, Selector, Opts, From, Limit, proplist,{?MODULE,[Pool,DB]}).
 cursor(Col,Query, Selector, Opts, From, Limit,Format,{?MODULE,[Pool,DB]}) ->
-	{_,Format,Q} = translateopts(false,Query, Opts,[{<<"query">>, {bson, bson:encode(Query)}}], Format),
-	Quer = #search{ndocs = Limit, nskip = From, field_selector = bson:encode(Selector),
-		criteria = bson:encode(Q),opts = ?QUER_OPT_CURSOR},
+	{_,Format,Q} = translateopts(false,Query, Opts,[{<<"query">>, {bson, bson2:encode(Query)}}], Format),
+	Quer = #search{ndocs = Limit, nskip = From, field_selector = bson2:encode(Selector),
+		criteria = bson2:encode(Q),opts = ?QUER_OPT_CURSOR},
 	case mongodb:exec_cursor(Pool,name(Col,{?MODULE,[Pool,DB]}), Quer) of
 		not_connected ->
 			not_connected;
 		{done, <<>>} ->
 			{done, []};
 		{done, Result} ->
-			{done, bson:decode(Format,Result)};
+			{done, bson2:decode(Format,Result)};
 		{Cursor, Result} ->
-			{ok, Cursor, bson:decode(Format,Result)}
+			{ok, Cursor, bson2:decode(Format,Result)}
 	end.
 
 getMore(Rec, Cursor,{?MODULE,[Pool,_DB]}) when is_list(Rec); is_binary(Rec) ->
@@ -274,9 +274,9 @@ getMore(Rec, Cursor,{?MODULE,[Pool,_DB]}) when is_list(Rec); is_binary(Rec) ->
 		{done, <<>>} ->
 			{done, []};
 		{done, Result} ->
-			{done, bson:decode(Result)};
+			{done, bson2:decode(Result)};
 		{ok, Result} ->
-			{ok, bson:decode(Result)}
+			{ok, bson2:decode(Result)}
 	end.
 closeCursor(Cur,_PMI) ->
 	Cur#cursor.pid ! {cleanup},
@@ -310,10 +310,10 @@ ensureIndex(Collection, Keys,{?MODULE,[Pool,DB]}) ->
 ensureIndex([_|_] = Collection, Keys,Opts,{?MODULE,[Pool,DB]}) ->
 	ensureIndex(list_to_binary(Collection), Keys,Opts,{?MODULE,[Pool,DB]});
 ensureIndex(<<_/binary>> = Collection, Keys,Opts,{?MODULE,[Pool,DB]}) ->
-	Obj = [{plaintext, <<"name">>, bson:gen_prop_keyname(Keys, <<>>)},
+	Obj = [{plaintext, <<"name">>, bson2:gen_prop_keyname(Keys, <<>>)},
 	 			 {plaintext, <<"ns">>, name(Collection,{?MODULE,[Pool,DB]})},
-	       {<<"key">>, {bson, bson:encode(Keys)}}|Opts],
-	Bin = bson:encode(Obj),
+	       {<<"key">>, {bson, bson2:encode(Keys)}}|Opts],
+	Bin = bson2:encode(Obj),
 	mongodb:ensureIndex(Pool,DB, Bin).
 % Example: ensureIndex(#mydoc{}, [{#mydoc.name, 1}])
 
@@ -326,7 +326,7 @@ deleteIndexes(<<_/binary>> = Collection,{?MODULE,[Pool,DB]}) ->
 deleteIndex(Rec, Key,{?MODULE,[Pool,DB]}) ->
 	mongodb:clearIndexCache(),
 	mongodb:exec_cmd(Pool,DB,[{plaintext, <<"deleteIndexes">>, atom_to_binary(element(1,Rec), latin1)},
-				  		 {plaintext, <<"index">>, bson:gen_keyname(Rec,Key)}]).
+				  		 {plaintext, <<"index">>, bson2:gen_keyname(Rec,Key)}]).
 
 % How many documents in mydoc collection: Mong:count("mydoc").
 %										  Mong:count(#mydoc{}).
@@ -344,11 +344,11 @@ count(ColIn, Query,{?MODULE,[Pool,DB]}) ->
 	end,
 	case true of
 		_ when is_list(Query) ->
-			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, bson:encode(Query)}}];
+			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, bson2:encode(Query)}}];
 		_ when is_tuple(ColIn), Query == undefined ->
-			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, bson:encoderec(ColIn)}}];
+			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, bson2:encoderec(ColIn)}}];
 		_ when is_tuple(ColIn), is_tuple(Query) ->
-			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, bson:encoderec(Query)}}];
+			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}, {<<"query">>, {bson, bson2:encoderec(Query)}}];
 		_ when Query == undefined ->
 			Cmd = [{plaintext, <<"count">>, Col}, {plaintext, <<"ns">>, DB}]
 	end,
@@ -371,7 +371,7 @@ addUser(U, P,PMI) when is_binary(P) ->
 	addUser(U,binary_to_list(P),PMI);
 addUser(Username, Password,PMI) ->
 	save(<<"system.users">>, [{<<"user">>, Username},
-							  {<<"pwd">>, bson:dec2hex(<<>>, erlang:md5(Username ++ ":mongo:" ++ Password))}],PMI).
+							  {<<"pwd">>, bson2:dec2hex(<<>>, erlang:md5(Username ++ ":mongo:" ++ Password))}],PMI).
 
 % Collection: name of collection
 % Key (list of fields): [{"i", 1}]
@@ -507,14 +507,14 @@ gfsOpen([_|_] = Col, R,PMI) ->
 gfsOpen(Collection, R,{?MODULE,[Pool,DB]}) ->
 	case true of
 		_ when R#gfs_file.docid == undefined; R#gfs_file.length == undefined; R#gfs_file.md5 == undefined ->
-			Quer = #search{ndocs = 1, nskip = 0, criteria = bson:encode_findrec(R)},
+			Quer = #search{ndocs = 1, nskip = 0, criteria = bson2:encode_findrec(R)},
 			case mongodb:exec_find(Pool,name(<<Collection/binary, ".files">>,{?MODULE,[Pool,DB]}), Quer) of
 				not_connected ->
 					not_connected;
 				<<>> ->
 					[];
 				{ok,_Tracing,Result} ->
-					[DR] = bson:decoderec(R, Result),
+					[DR] = bson2:decoderec(R, Result),
 					gfsOpen(Collection,DR)
 			end;
 		_ ->
@@ -537,14 +537,14 @@ gfsDelete([_|_] = Col, R, PMI) ->
 gfsDelete(Collection, R, {?MODULE,[Pool,DB]}) ->
 	case R#gfs_file.docid of
 		undefined ->
-			Quer = #search{ndocs = 1, nskip = 0, criteria = bson:encode_findrec(R)},
+			Quer = #search{ndocs = 1, nskip = 0, criteria = bson2:encode_findrec(R)},
 			case mongodb:exec_find(Pool,name(<<Collection/binary, ".files">>,{?MODULE,[Pool,DB]}), Quer) of
 				not_connected ->
 					not_connected;
 				<<>> ->
 					[];
 				{ok,_Tracing,Result} ->
-					[DR] = bson:decoderec(R, Result),
+					[DR] = bson2:decoderec(R, Result),
 					gfsDelete(DR,{?MODULE,[Pool,DB]})
 			end;
 		_ ->

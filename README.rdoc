@@ -103,7 +103,7 @@ mongodb:sharded/2
   Mong:gfsClose(PID).
 
 = Supported Data types and modifiers
-Look at bson:encode_element/1
+Look at bson2:encode_element/1
 
 = SSL support
 You can use application environment variables or use set_ssl to establish connections over ssl before you connect with mongodb:connect.

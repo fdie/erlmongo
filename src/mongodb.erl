@@ -230,7 +230,7 @@ exec_update(Pool,Collection, D) ->
 	trysend(Pool,{update,Collection,D}, unsafe).
 exec_cmd(Pool,DB, Cmd) ->
 	TStart = erlang:monotonic_time(millisecond),
-	CmdBin = bson:encode(Cmd),
+	CmdBin = bson2:encode(Cmd),
 	Quer = #search{ndocs = 1, nskip = 0, criteria = CmdBin},
 	case exec_find(Pool,<<DB/binary, ".$cmd">>, Quer) of
 		not_connected ->
@@ -238,7 +238,7 @@ exec_cmd(Pool,DB, Cmd) ->
 		<<>> ->
 			[];
 		{ok,Tracing, Result} ->
-			Dec = bson:decode(Result),
+			Dec = bson2:decode(Result),
 			TEnd = erlang:monotonic_time(millisecond),
 			Tracing1 = Tracing#{q => Cmd, q_size => iolist_size(CmdBin), bson_resp_bytes => iolist_size(Result)},
 			mongoapi:report(TEnd - TStart, Tracing1),
@@ -273,7 +273,7 @@ trysend(Pid,Query,unsafe) ->
 	ok.
 
 create_id() ->
-	bson:dec2hex(<<>>, gen_server:call(?MODULE, {create_oid})).
+	bson2:dec2hex(<<>>, gen_server:call(?MODULE, {create_oid})).
 
 startgfs(P) ->
 	PID = spawn_link(fun() -> gfs_proc(P,<<>>) end),
@@ -328,7 +328,7 @@ handle_cast({ensure_index,Pool, DB, Bin}, P) ->
 		[] ->
 			spawn(fun() ->
 				Mon = mongoapi:new(Pool,DB),
-				case mongoapi:insert(<<"system.indexes">>, hd(bson:decode(Bin)), Mon) of
+				case mongoapi:insert(<<"system.indexes">>, hd(bson2:decode(Bin)), Mon) of
 					ok ->
 						gen_server:cast(?MODULE,{ensure_index_store, DB, Bin});
 					{error,[Ok|_]} when Ok > 0 ->
@@ -494,7 +494,7 @@ handle_info({query_result,_Tm,_Tm1, Src, <<_:20/binary, Res/binary>>}, P) ->
 	case maps:get(Src, P#mngd.pids, undefined) of
 		{Pool,PidState} ->
 			% io:format("got ismaster query_result ~p~n", [Pool]),
-			case catch bson:decode(Res) of
+			case catch bson2:decode(Res) of
 				[Obj] ->
 					case proplists:get_value(<<"ismaster">>,Obj) of
 						Val when Val == true; Val == 1 ->
@@ -621,12 +621,12 @@ gfs_proc(#gfs_state{mode = write} = P, Buf) ->
 		{start} ->
 			process_flag(trap_exit,true),
 			FileID = (P#gfs_state.file)#gfs_file.docid,
-			exec_update(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".files">>, #update{selector = bson:encode([{<<"_id">>, {oid, FileID}}]),
-																		document = bson:encoderec(P#gfs_state.file)}),
+			exec_update(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".files">>, #update{selector = bson2:encode([{<<"_id">>, {oid, FileID}}]),
+																		document = bson2:encoderec(P#gfs_state.file)}),
 			Keys = [{<<"files_id">>, 1},{<<"n">>,1}],
-			Bin = bson:encode([{plaintext, <<"name">>, bson:gen_prop_keyname(Keys, <<>>)},
+			Bin = bson2:encode([{plaintext, <<"name">>, bson2:gen_prop_keyname(Keys, <<>>)},
 			 					  {plaintext, <<"ns">>, <<(P#gfs_state.collection)/binary, ".chunks">>},
-			                      {<<"key">>, {bson, bson:encode(Keys)}}]),
+			                      {<<"key">>, {bson, bson2:encode(Keys)}}]),
 			ensureIndex(P#gfs_state.pool,P#gfs_state.db, Bin),
 			gfs_proc(P,<<>>)
 		% X ->
@@ -653,7 +653,7 @@ gfs_proc(#gfs_state{mode = read} = P, Buf) ->
 				_ ->
 					GetChunks = ((N - byte_size(Buf)) div CSize) + 1,
 					Quer = #search{ndocs = GetChunks, nskip = 0,
-								   criteria = bson:encode([{<<"files_id">>, (P#gfs_state.file)#gfs_file.docid},
+								   criteria = bson2:encode([{<<"files_id">>, (P#gfs_state.file)#gfs_file.docid},
 															  {<<"n">>, {in,{gte, P#gfs_state.nchunk},{lte, P#gfs_state.nchunk + GetChunks}}}]),
 								   field_selector = get(field_selector)},
 					case exec_find(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".chunks">>, Quer) of
@@ -665,7 +665,7 @@ gfs_proc(#gfs_state{mode = read} = P, Buf) ->
 							gfs_proc(P,Buf);
 						ResBin ->
 							% io:format("Result ~p~n", [ResBin]),
-							Result = chunk2bin(bson:decode(ResBin), <<>>),
+							Result = chunk2bin(bson2:decode(ResBin), <<>>),
 							case true of
 								_ when byte_size(Result) + byte_size(Buf) =< N ->
 									Rem = <<>>,
@@ -680,7 +680,7 @@ gfs_proc(#gfs_state{mode = read} = P, Buf) ->
 		{close} ->
 			true;
 		{start} ->
-			put(field_selector, bson:encode([{<<"data">>, 1}])),
+			put(field_selector, bson2:encode([{<<"data">>, 1}])),
 			gfs_proc(P, <<>>)
 	end.
 
@@ -697,11 +697,11 @@ gfsflush(P, Bin, Out) ->
 		<<ChunkBin:CSize/binary, Rem/binary>> ->
 			Chunk = #gfs_chunk{docid = {oid,create_id()}, files_id = FileID, n = P#gfs_state.nchunk, data = {binary, 2, ChunkBin}},
 			gfsflush(P#gfs_state{nchunk = P#gfs_state.nchunk + 1, length = P#gfs_state.length + CSize},
-					 Rem, <<Out/binary, (bson:encoderec(Chunk))/binary>>);
+					 Rem, <<Out/binary, (bson2:encoderec(Chunk))/binary>>);
 		Rem when P#gfs_state.closed == true, byte_size(Rem) > 0 ->
 			Chunk = #gfs_chunk{docid = {oid,create_id()}, files_id = FileID, n = P#gfs_state.nchunk, data = {binary, 2, Rem}},
 			gfsflush(P#gfs_state{length = P#gfs_state.length + byte_size(Rem)},
-			         <<>>, <<Out/binary, (bson:encoderec(Chunk))/binary>>);
+			         <<>>, <<Out/binary, (bson2:encoderec(Chunk))/binary>>);
 		Rem when byte_size(Out) > 0 ->
 			File = P#gfs_state.file,
 			exec_insert(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".chunks">>, #insert{documents = Out}),
@@ -719,8 +719,8 @@ gfsflush(P, Bin, Out) ->
 				false ->
 					MD5 = undefined
 			end,
-			exec_update(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".files">>, #update{selector = bson:encode([{<<"_id">>, FileID}]),
-																		document = bson:encoderec(File#gfs_file{length = P#gfs_state.length,
+			exec_update(P#gfs_state.pool,<<(P#gfs_state.collection)/binary, ".files">>, #update{selector = bson2:encode([{<<"_id">>, FileID}]),
+																		document = bson2:encoderec(File#gfs_file{length = P#gfs_state.length,
 																		                                           md5 = MD5})}),
 			gfsflush(P, Rem, <<>>);
 		_Rem ->
@@ -822,11 +822,11 @@ connection(#con{} = P,Index,Buf) ->
 				_ ->
 					erlang:send_after(1000,self(),{ping}),
 					self() ! {find, whereis(?MODULE), <<"admin.$cmd">>,
-						#search{nskip = 0, ndocs = 1, criteria = bson:encode([{<<"ismaster">>, 1}])}}
+						#search{nskip = 0, ndocs = 1, criteria = bson2:encode([{<<"ismaster">>, 1}])}}
 			end,
 			connection(P, Index, Buf);
 			% Collection = <<"admin.$cmd">>,
-			% Query = #search{nskip = 0, ndocs = 1, criteria = bson:encode([{<<"ping">>, 1}])},
+			% Query = #search{nskip = 0, ndocs = 1, criteria = bson2:encode([{<<"ping">>, 1}])},
 			% QBin = constr_query(Query,Index, Collection),
 			% ok = do_send(P#con.sock, QBin),
 			% connection(P,Index+1,Buf);
@@ -894,7 +894,7 @@ do_send(Sock, Packet, false)->
 
 init_auth(Source, undefined,undefined) ->
 	self() ! {find, Source, <<"admin.$cmd">>,
-		#search{nskip = 0, ndocs = 1, criteria = bson:encode([{<<"ismaster">>, 1}])}},
+		#search{nskip = 0, ndocs = 1, criteria = bson2:encode([{<<"ismaster">>, 1}])}},
 	undefined;
 init_auth(Source, Us,Pw) ->
 	scram_first_step_start(#auth{us = Us, pw = Pw, source = Source}).
@@ -995,21 +995,21 @@ scram_first_step_start(P) ->
 		{<<"payload">>, {binary, Message}},
 		{<<"autoAuthorize">>, 1}],
 	self() ! {find, self(), <<"admin.$cmd">>,
-		#search{nskip = 0, ndocs = 1, criteria = bson:encode(Doc)}},
+		#search{nskip = 0, ndocs = 1, criteria = bson2:encode(Doc)}},
 	P#auth{nonce = RandomBString, first_msg = FirstMessage, step = 1}.
 
 scram_step(#auth{step = 1} = P, Res1) ->
   % {true, Res} = mc_worker_api:sync_command(Socket, <<"admin">>,
   %   {<<"saslStart">>, 1, <<"mechanism">>, <<"SCRAM-SHA-1">>, <<"payload">>, {bin, bin, Message}, <<"autoAuthorize">>, 1}, SetOpts),
-	[Res] = bson:decode(map, Res1),
+	[Res] = bson2:decode(map, Res1),
 	ConversationId = maps:get(<<"conversationId">>, Res, {}),
   Payload = maps:get(<<"payload">>, Res),
   scram_second_step_start(P, Payload, ConversationId);
 scram_step(#auth{step = 2} = P, Res1) ->
-	[Res] = bson:decode(map, Res1),
+	[Res] = bson2:decode(map, Res1),
 	scram_third_step_start(P, base64:encode(P#auth.sig), Res);
 scram_step(#auth{step = 4} = P, Res1) ->
-	[#{<<"done">> := true}] = bson:decode(map, Res1),
+	[#{<<"done">> := true}] = bson2:decode(map, Res1),
 	init_auth(P#auth.source, undefined, undefined).
 
 
@@ -1022,7 +1022,7 @@ scram_second_step_start(P, {binary, _, Decoded} = _Payload, ConversationId) ->
 	{<<"conversationId">>, ConversationId},
   {<<"payload">>, {binary,  ClientFinalMessage}}],
 	self() ! {find, self(), <<"admin.$cmd">>,
-		#search{nskip = 0, ndocs = 1, criteria = bson:encode(Doc)}},
+		#search{nskip = 0, ndocs = 1, criteria = bson2:encode(Doc)}},
 	P#auth{sig = Signature, step = 2, conv_id = ConversationId}.
 
 %% @private
@@ -1040,7 +1040,7 @@ scram_forth_step_start(P, false) ->
 	{<<"conversationId">>, P#auth.conv_id},
 	{<<"payload">>, {binary, <<>>}}],
 	self() ! {find, self(), <<"admin.$cmd">>,
-			#search{nskip = 0, ndocs = 1, criteria = bson:encode(Doc)}},
+			#search{nskip = 0, ndocs = 1, criteria = bson2:encode(Doc)}},
 	P#auth{step = 4}.
 
 %% @private
@@ -1071,7 +1071,7 @@ compose_second_message(Payload, Login, Password, RandomBString, FirstMessage) ->
   {ServerSignature, <<ClientFinalMessageWithoutProof/binary, ",", Proof/binary>>}.
 
 pw_hash(Username, Password) ->
-	bson:dec2hex(<<>>, crypto:hash(md5, [Username, <<":mongo:">>, Password])).
+	bson2:dec2hex(<<>>, crypto:hash(md5, [Username, <<":mongo:">>, Password])).
 
 %% @private
 generate_proof(SaltedPassword, AuthMessage) ->

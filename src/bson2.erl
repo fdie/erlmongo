@@ -1,4 +1,4 @@
--module(bson).
+-module(bson2).
 -export([encode/1, decode/1, encode/2, decode/2, dec2hex/2, hex2dec/2]).
 -export([recfields/1, encoderec/1, encode_findrec/1, encoderec_selector/2,
   decoderec/2, gen_keyname/2, gen_prop_keyname/2, recoffset/1]).
