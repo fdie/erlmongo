@@ -893,8 +893,8 @@ do_send(Sock, Packet, false)->
 	gen_tcp:send(Sock, Packet).
 
 init_auth(Source, undefined,undefined) ->
-	self() ! {find, Source, <<"admin.$cmd">>,
-		#search{nskip = 0, ndocs = 1, criteria = bson2:encode([{<<"ismaster">>, 1}])}},
+	self() ! {find, Source, <<"rainbow.$cmd">>,
+		#search{nskip = 0, ndocs = 1, criteria = bson:encode([{<<"ismaster">>, 1}])}},
 	undefined;
 init_auth(Source, Us,Pw) ->
 	scram_first_step_start(#auth{us = Us, pw = Pw, source = Source}).
@@ -994,8 +994,8 @@ scram_first_step_start(P) ->
 		{<<"mechanism">>, <<"SCRAM-SHA-1">>},
 		{<<"payload">>, {binary, Message}},
 		{<<"autoAuthorize">>, 1}],
-	self() ! {find, self(), <<"admin.$cmd">>,
-		#search{nskip = 0, ndocs = 1, criteria = bson2:encode(Doc)}},
+	self() ! {find, self(), <<"rainbow.$cmd">>,
+		#search{nskip = 0, ndocs = 1, criteria = bson:encode(Doc)}},
 	P#auth{nonce = RandomBString, first_msg = FirstMessage, step = 1}.
 
 scram_step(#auth{step = 1} = P, Res1) ->
@@ -1021,8 +1021,8 @@ scram_second_step_start(P, {binary, _, Decoded} = _Payload, ConversationId) ->
 	Doc = [{<<"saslContinue">>, 1},
 	{<<"conversationId">>, ConversationId},
   {<<"payload">>, {binary,  ClientFinalMessage}}],
-	self() ! {find, self(), <<"admin.$cmd">>,
-		#search{nskip = 0, ndocs = 1, criteria = bson2:encode(Doc)}},
+	self() ! {find, self(), <<"rainbow.$cmd">>,
+		#search{nskip = 0, ndocs = 1, criteria = bson:encode(Doc)}},
 	P#auth{sig = Signature, step = 2, conv_id = ConversationId}.
 
 %% @private
@@ -1039,8 +1039,8 @@ scram_forth_step_start(P, false) ->
 	Doc = [{<<"saslContinue">>, 1},
 	{<<"conversationId">>, P#auth.conv_id},
 	{<<"payload">>, {binary, <<>>}}],
-	self() ! {find, self(), <<"admin.$cmd">>,
-			#search{nskip = 0, ndocs = 1, criteria = bson2:encode(Doc)}},
+	self() ! {find, self(), <<"rainbow.$cmd">>,
+			#search{nskip = 0, ndocs = 1, criteria = bson:encode(Doc)}},
 	P#auth{step = 4}.
 
 %% @private
